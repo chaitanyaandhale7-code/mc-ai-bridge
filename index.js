@@ -178,6 +178,34 @@ function scheduleReconnect() {
   }, 15000);
 }
 
+// ---------- Diagnostic: test if outbound UDP works at all from this container ----------
+function testUdp() {
+  const dgram = require('dgram');
+  const socket = dgram.createSocket('udp4');
+  // Minimal DNS query packet asking for A record of google.com
+  const dnsQuery = Buffer.from([
+    0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00,
+    0x00, 0x01, 0x00, 0x01,
+  ]);
+  const timeout = setTimeout(() => {
+    console.log('[UDP TEST] FAILED - no response from 8.8.8.8:53 within 5s. Outbound UDP is likely blocked on this container.');
+    socket.close();
+  }, 5000);
+  socket.on('message', () => {
+    clearTimeout(timeout);
+    console.log('[UDP TEST] SUCCESS - got a response from 8.8.8.8:53. Outbound UDP works fine.');
+    socket.close();
+  });
+  socket.on('error', (err) => {
+    clearTimeout(timeout);
+    console.log('[UDP TEST] ERROR -', err.message);
+    socket.close();
+  });
+  socket.send(dnsQuery, 53, '8.8.8.8');
+}
+
+testUdp();
 startBot();
 
 // ---------- Tiny HTTP server so Railway keeps the service alive ----------
