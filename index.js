@@ -67,6 +67,8 @@ function startBot() {
     port: SERVER_PORT,
     username: BOT_USERNAME,
     offline: true, // no Xbox login needed for LAN/local worlds with cheats
+    skipPing: true, // don't ping first, connect directly
+    version: process.env.MC_VERSION || '1.21.50',
   });
 
   let spawned = false;
