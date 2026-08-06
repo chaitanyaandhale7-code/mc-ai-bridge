@@ -1,13 +1,13 @@
 {
   "name": "mc-ai-bridge",
-  "version": "1.0.0",
-  "description": "AI companion bridge for Minecraft Bedrock using mcpews and Groq",
+  "version": "2.0.0",
+  "description": "Autonomous AI Minecraft Bedrock player bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "mcpews": "^4.0.1",
-    "node-fetch": "^2.7.0"
+    "bedrock-protocol": "^3.32.0",
+    "node-fetch": "^2.6.9"
   }
 }
