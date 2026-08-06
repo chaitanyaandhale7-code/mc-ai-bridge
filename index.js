@@ -13,17 +13,25 @@ if (!GROQ_API_KEY) {
   console.error('ERROR: GROQ_API_KEY environment variable is not set.');
 }
 
-// 1. Railway ke liye HTTP Server (Taaki SIGTERM error na aaye)
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Minecraft AI Bridge is Alive and Running!\n');
+// Safety nets to catch any unexpected errors
+process.on('uncaughtException', (err) => {
+  console.error('🚨 UNCAUGHT EXCEPTION:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 UNHANDLED REJECTION:', reason);
 });
 
-// 2. Usi HTTP server ke upar WSServer ko fit kiya
+// Create HTTP server so Railway doesn't kill the deployment
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Minecraft AI Bridge is running smoothly!\n');
+});
+
+// Attach WSServer to the HTTP server
 const wss = new WSServer({ server });
 
 server.listen(PORT, () => {
-  console.log(`HTTP and WebSocket Bridge listening on port ${PORT}`);
+  console.log(`Bridge & HTTP server listening on port ${PORT}`);
 });
 
 wss.on('client', ({ session }) => {
@@ -44,11 +52,12 @@ wss.on('client', ({ session }) => {
       sender = body.properties.Sender;
     }
 
+    // Ignore messages that don't start with the trigger
     if (!message || !message.startsWith(TRIGGER)) return;
     const prompt = message.slice(TRIGGER.length).trim();
     if (!prompt) return;
 
-    console.log(`[${sender}]: ${prompt}`);
+    console.log(`[${sender || 'Player'}]: ${prompt}`);
     
     try {
       session.sendCommand(`say Thinking...`);
@@ -69,7 +78,6 @@ wss.on('client', ({ session }) => {
       const data = await response.json();
       const reply = data.choices?.[0]?.message?.content || 'No response from AI.';
       
-      // Minecraft chat mein lambe message ko chote parts mein bhejna
       const cleanReply = reply.replace(/\n/g, ' ');
       session.sendCommand(`say ${BOT_NAME}: ${cleanReply}`);
 
@@ -79,3 +87,4 @@ wss.on('client', ({ session }) => {
     }
   });
 });
+    
