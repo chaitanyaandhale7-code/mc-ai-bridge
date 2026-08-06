@@ -205,7 +205,36 @@ function testUdp() {
   socket.send(dnsQuery, 53, '8.8.8.8');
 }
 
+// ---------- Diagnostic: raw RakNet unconnected ping to the MC tunnel ----------
+function testRaknetPing() {
+  const dgram = require('dgram');
+  const socket = dgram.createSocket('udp4');
+  const magic = Buffer.from([0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78]);
+  const packet = Buffer.concat([
+    Buffer.from([0x01]), // ID_UNCONNECTED_PING
+    Buffer.alloc(8), // timestamp (can be zero)
+    magic,
+    Buffer.alloc(8), // client GUID (can be zero)
+  ]);
+  const timeout = setTimeout(() => {
+    console.log(`[RAKNET TEST] FAILED - no response from ${SERVER_HOST}:${SERVER_PORT} within 8s.`);
+    socket.close();
+  }, 8000);
+  socket.on('message', (msg) => {
+    clearTimeout(timeout);
+    console.log(`[RAKNET TEST] SUCCESS - got ${msg.length} bytes back from ${SERVER_HOST}:${SERVER_PORT}. First byte: 0x${msg[0]?.toString(16)}`);
+    socket.close();
+  });
+  socket.on('error', (err) => {
+    clearTimeout(timeout);
+    console.log('[RAKNET TEST] ERROR -', err.message);
+    socket.close();
+  });
+  socket.send(packet, SERVER_PORT, SERVER_HOST);
+}
+
 testUdp();
+testRaknetPing();
 startBot();
 
 // ---------- Tiny HTTP server so Railway keeps the service alive ----------
