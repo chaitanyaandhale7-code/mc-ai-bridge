@@ -1,39 +1,81 @@
-// mc-ai-bridge v2 — autonomous Minecraft Bedrock player bot
-// Connects to your world THROUGH your playit.gg tunnel as a real player,
-// and uses Groq to decide what to say / do.
-
-const bedrock = require('bedrock-protocol');
+const { WSServer, Version } = require('mcpews');
 const fetch = require('node-fetch');
+const memory = require('./memory');
 
-// ---------- CONFIG (from environment variables) ----------
-const SERVER_HOST = process.env.MC_HOST || '127.0.0.1'; // running locally now, no tunnel needed for the bot
-const SERVER_PORT = parseInt(process.env.MC_PORT || '19132', 10);
-const BOT_USERNAME = process.env.BOT_USERNAME || 'AI_Buddy';
+const PORT = process.env.PORT || 19134;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const BOT_NAME = 'AI'; // change if you want a different in-game name for it
+const TRIGGER = '!ai'; // players type: !ai <message>
 
 if (!GROQ_API_KEY) {
-  console.error('GROQ_API_KEY env var is not set!');
-  process.exit(1);
+  console.error('ERROR: GROQ_API_KEY environment variable is not set.');
 }
 
-// ---------- Tiny in-memory conversation memory ----------
-const memory = [];
-function remember(role, content) {
-  memory.push({ role, content });
-  if (memory.length > 20) memory.shift();
-}
+const server = new WSServer(PORT);
+console.log(`Bridge listening on port ${PORT}`);
 
-// ---------- Groq call ----------
-async function askGroq(userMessage) {
-  remember('user', userMessage);
+server.on('client', ({ session }) => {
+  console.log('Minecraft client connected');
+  session.sendCommand('say §aAI companion connected!');
 
-  const systemPrompt = `You are an AI playing Minecraft Bedrock as a real in-game player named ${BOT_USERNAME}.
-You can chat, and you can move (forward, back, left, right, jump, look around).
-Reply with a SHORT, casual, in-character chat message (max 1-2 sentences) responding to the player.
-Do not use markdown or emojis excessively. Keep it fun and human-like.`;
+  session.subscribe('PlayerMessage', async (event) => {
+    try {
+      const { body, version } = event;
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      let message, messageType, sender;
+      if (body?.message !== undefined) {
+        message = body.message;
+        messageType = body.type;
+        sender = body.sender;
+      } else if (body?.properties) {
+        message = body.properties.Message;
+        messageType = body.properties.MessageType;
+        sender = body.properties.Sender;
+      } else {
+        return; // unknown format, skip safely
+      }
+
+      // Ignore non-chat messages and the bot's own messages
+      if (messageType !== 'chat') return;
+      if (sender === BOT_NAME) return;
+      if (!message || !message.startsWith(TRIGGER)) return;
+
+      const userText = message.slice(TRIGGER.length).trim();
+      if (!userText) return;
+
+      console.log(`${sender} asked: ${userText}`);
+
+      try {
+        const reply = await askGroq(sender, userText);
+        // Minecraft chat can't handle newlines well - flatten them
+        const safeReply = reply.replace(/\n+/g, ' ').slice(0, 400);
+        session.sendCommand(`say [${BOT_NAME}] ${safeReply}`);
+      } catch (err) {
+        console.error('Groq error:', err);
+        session.sendCommand(`say [${BOT_NAME}] Sorry, kuch gadbad ho gayi (${err.message})`);
+      }
+    } catch (outerErr) {
+      console.error('PlayerMessage handler error (ignored, server stays alive):', outerErr);
+    }
+  });
+});
+
+async function askGroq(sender, userText) {
+  memory.addUserMessage(sender, userText);
+
+  const messages = [
+    {
+      role: 'system',
+      content:
+        'You are a friendly AI companion living inside a Minecraft world. ' +
+        'Keep replies short (1-3 sentences) since they are shown in Minecraft chat. ' +
+        'You can be playful and give advice about building, mining, survival etc.',
+    },
+    ...memory.getHistory(),
+  ];
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -41,137 +83,19 @@ Do not use markdown or emojis excessively. Keep it fun and human-like.`;
     },
     body: JSON.stringify({
       model: GROQ_MODEL,
-      messages: [{ role: 'system', content: systemPrompt }, ...memory],
-      max_tokens: 150,
-      temperature: 0.9,
+      messages,
+      max_tokens: 200,
     }),
   });
 
-  const data = await res.json();
-  const reply = data?.choices?.[0]?.message?.content?.trim() || "...";
-  remember('assistant', reply);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Groq API ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const reply = data.choices?.[0]?.message?.content?.trim() || '...';
+  memory.addAiMessage(reply);
   return reply;
-}
-
-// ---------- Connect to Minecraft as a real client ----------
-function startBot() {
-  console.log(`Connecting to ${SERVER_HOST}:${SERVER_PORT} as "${BOT_USERNAME}"...`);
-
-  const client = bedrock.createClient({
-    host: SERVER_HOST,
-    port: SERVER_PORT,
-    username: BOT_USERNAME,
-    offline: true, // no Xbox login needed for LAN/local worlds with cheats
-    skipPing: true, // don't ping first, connect directly
-    version: process.env.MC_VERSION || '1.21.50',
-    raknetBackend: 'jsp-raknet', // pure JS RakNet — no native compilation needed
-  });
-
-  let spawned = false;
-  let tickInterval = null;
-
-  client.on('spawn', () => {
-    spawned = true;
-    console.log('Bot has spawned into the world!');
-    sendChat("Hey! I'm online and ready to play. Say !ai <message> to talk to me!");
-
-    // Basic idle "alive" loop — sends movement packets so the bot doesn't
-    // get kicked for being AFK, and enables simple move commands later.
-    tickInterval = setInterval(() => {
-      try {
-        client.queue('player_auth_input', {
-          pitch: 0,
-          yaw: 0,
-          head_yaw: 0,
-          position: client.entity?.position || { x: 0, y: 0, z: 0 },
-          move_vector: { x: 0, z: 0 },
-          input_data: [],
-          input_mode: 'mouse',
-          play_mode: 'normal',
-          interact_pitch: 0,
-          interact_yaw: 0,
-          tick: BigInt(Date.now()),
-          delta: { x: 0, y: 0, z: 0 },
-          item_stack_request: null,
-          block_actions: [],
-        });
-      } catch (e) {
-        // Some server versions differ in exact fields; safe to ignore ticks that fail
-      }
-    }, 1000);
-  });
-
-  client.on('text', async (packet) => {
-    if (!spawned) return;
-    if (packet.type !== 'chat') return;
-    if (packet.source_name === BOT_USERNAME) return; // ignore own messages
-
-    const msg = packet.message || '';
-    if (!msg.startsWith('!ai ')) return;
-
-    const userMsg = msg.slice(4).trim();
-    console.log(`[chat] ${packet.source_name}: ${userMsg}`);
-
-    try {
-      const reply = await askGroq(`${packet.source_name} says: ${userMsg}`);
-      sendChat(reply);
-    } catch (e) {
-      console.error('Groq error:', e.message);
-      sendChat("Sorry, my brain lagged for a second!");
     }
-  });
-
-  client.on('disconnect', (packet) => {
-    console.log('Disconnected from server:', packet);
-    cleanup();
-    scheduleReconnect();
-  });
-
-  client.on('close', () => {
-    console.log('Connection closed.');
-    cleanup();
-    scheduleReconnect();
-  });
-
-  client.on('kick', (reason) => {
-    console.log('Kicked:', reason);
-  });
-
-  client.on('error', (err) => {
-    console.error('Client error:', err.message);
-  });
-
-  function sendChat(message) {
-    try {
-      client.queue('text', {
-        type: 'chat',
-        needs_translation: false,
-        source_name: BOT_USERNAME,
-        message,
-        parameters: [],
-        xuid: '',
-        platform_chat_id: '',
-        filtered_message: '',
-      });
-    } catch (e) {
-      console.error('Failed to send chat:', e.message);
-    }
-  }
-
-  function cleanup() {
-    spawned = false;
-    if (tickInterval) clearInterval(tickInterval);
-  }
-}
-
-let reconnectTimer = null;
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  console.log('Reconnecting in 15 seconds...');
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    startBot();
-  }, 15000);
-}
-
-startBot();
+          
