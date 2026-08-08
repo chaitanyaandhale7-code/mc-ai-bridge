@@ -33,8 +33,11 @@ console.log(`Bridge listening on port ${PORT}`);
   }
 })();
 
+let currentSession = null;
+
 server.on('client', ({ session }) => {
   console.log('Minecraft client connected');
+  currentSession = session;
   session.sendCommand('say §aAI companion connected!');
 
   // Keepalive: send a silent command every 15s so the connection doesn't
@@ -80,7 +83,7 @@ server.on('client', ({ session }) => {
         const reply = await askGroq(sender, userText);
         // Minecraft chat can't handle newlines well - flatten them
         const safeReply = reply.replace(/\n+/g, ' ').slice(0, 400);
-        session.sendCommand(`say [${BOT_NAME}] ${safeReply}`);
+        (currentSession || session).sendCommand(`say [${BOT_NAME}] ${safeReply}`);
         console.log(`[REPLY SENT] ${safeReply}`);
       } catch (err) {
         console.error('Groq error:', err);
@@ -143,4 +146,4 @@ async function askGroq(sender, userText) {
   memory.addAiMessage(reply);
   return reply;
     }
-          
+      
