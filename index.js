@@ -37,6 +37,18 @@ server.on('client', ({ session }) => {
   console.log('Minecraft client connected');
   session.sendCommand('say §aAI companion connected!');
 
+  // Keepalive: send a silent command every 15s so the connection doesn't
+  // go idle and get dropped by the network before a reply can be sent.
+  const keepaliveInterval = setInterval(() => {
+    try {
+      session.sendCommand('list');
+    } catch (e) {
+      clearInterval(keepaliveInterval);
+    }
+  }, 15000);
+
+  session.socket?.on('close', () => clearInterval(keepaliveInterval));
+
   session.subscribe('PlayerMessage', async (event) => {
     try {
       const { body, version } = event;
