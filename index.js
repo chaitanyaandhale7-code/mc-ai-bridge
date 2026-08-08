@@ -40,16 +40,6 @@ server.on('client', ({ session }) => {
   currentSession = session;
   session.sendCommand('say §aAI companion connected!');
 
-  setTimeout(() => {
-    console.log('[TEST] Sending delayed test message now...');
-    try {
-      currentSession.sendCommand('say §bDELAYED TEST MESSAGE - if you see this, delayed commands work!');
-      console.log('[TEST] sendCommand call completed without error');
-    } catch (e) {
-      console.log('[TEST] sendCommand threw an error:', e.message);
-    }
-  }, 5000);
-
   // Keepalive: send a silent command every 15s so the connection doesn't
   // go idle and get dropped by the network before a reply can be sent.
   const keepaliveInterval = setInterval(() => {
@@ -82,9 +72,7 @@ server.on('client', ({ session }) => {
       // Ignore non-chat messages and the bot's own messages
       if (messageType !== 'chat') return;
       if (sender === BOT_NAME) return;
-      if (!message || !message.startsWith(TRIGGER)) return;
-
-      const userText = message.slice(TRIGGER.length).trim();
+      const userText = message.trim();
       if (!userText) return;
 
       console.log(`${sender} asked: ${userText}`);
@@ -160,5 +148,5 @@ async function askGroq(sender, userText) {
   const reply = data.choices?.[0]?.message?.content?.trim() || '...';
   memory.addAiMessage(reply);
   return reply;
-  }
-          
+}
+  
