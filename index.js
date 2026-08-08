@@ -90,19 +90,16 @@ server.on('client', ({ session }) => {
       console.log(`${sender} asked: ${userText}`);
 
       try {
-        console.log('[TEST] Sending immediate ack before Groq call...');
-        (currentSession || session).sendCommand('say §eTRIGGER RECEIVED - processing your message...');
-        console.log('[TEST] Immediate ack sendCommand completed');
-      } catch (e) {
-        console.log('[TEST] Immediate ack FAILED:', e.message);
-      }
-
-      try {
         const reply = await askGroq(sender, userText);
         // Minecraft chat can't handle newlines well - flatten them
-        const safeReply = reply.replace(/\n+/g, ' ').slice(0, 400);
-        (currentSession || session).sendCommand(`say [${BOT_NAME}] ${safeReply}`);
-        console.log(`[REPLY SENT] ${safeReply}`);
+        // Also avoid square brackets [ ] in case they're parsed as selector syntax
+        const safeReply = reply.replace(/\n+/g, ' ').replace(/[[\]]/g, '').slice(0, 400);
+        const cmdString = `say AI: ${safeReply}`;
+        console.log(`[SENDING COMMAND] "${cmdString}"`);
+        (currentSession || session).sendCommand(cmdString, (response) => {
+          console.log('[COMMAND RESPONSE]', JSON.stringify(response));
+        });
+        console.log(`[REPLY SENT - sendCommand call returned]`);
       } catch (err) {
         console.error('Groq error:', err);
         session.sendCommand(`say [${BOT_NAME}] Sorry, kuch gadbad ho gayi (${err.message})`);
@@ -164,4 +161,4 @@ async function askGroq(sender, userText) {
   memory.addAiMessage(reply);
   return reply;
   }
-  
+          
