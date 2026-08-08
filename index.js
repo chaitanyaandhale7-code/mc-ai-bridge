@@ -15,6 +15,24 @@ if (!GROQ_API_KEY) {
 const server = new WSServer(PORT);
 console.log(`Bridge listening on port ${PORT}`);
 
+// ---------- Startup diagnostic: verify Groq API key + connectivity ----------
+(async () => {
+  try {
+    console.log('[GROQ TEST] Testing API key and connectivity...');
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+    });
+    if (res.ok) {
+      console.log('[GROQ TEST] SUCCESS - key is valid and Groq is reachable.');
+    } else {
+      const text = await res.text();
+      console.log(`[GROQ TEST] FAILED - status ${res.status}: ${text.slice(0, 300)}`);
+    }
+  } catch (e) {
+    console.log('[GROQ TEST] ERROR -', e.message);
+  }
+})();
+
 server.on('client', ({ session }) => {
   console.log('Minecraft client connected');
   session.sendCommand('say §aAI companion connected!');
@@ -51,6 +69,7 @@ server.on('client', ({ session }) => {
         // Minecraft chat can't handle newlines well - flatten them
         const safeReply = reply.replace(/\n+/g, ' ').slice(0, 400);
         session.sendCommand(`say [${BOT_NAME}] ${safeReply}`);
+        console.log(`[REPLY SENT] ${safeReply}`);
       } catch (err) {
         console.error('Groq error:', err);
         session.sendCommand(`say [${BOT_NAME}] Sorry, kuch gadbad ho gayi (${err.message})`);
@@ -75,18 +94,32 @@ async function askGroq(sender, userText) {
     ...memory.getHistory(),
   ];
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages,
-      max_tokens: 200,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  let response;
+  try {
+    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages,
+        max_tokens: 200,
+      }),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') throw new Error('Groq request timed out after 15s');
+    throw e;
+  }
+  clearTimeout(timeoutId);
+
+  console.log(`[GROQ] response status: ${response.status}`);
 
   if (!response.ok) {
     const text = await response.text();
