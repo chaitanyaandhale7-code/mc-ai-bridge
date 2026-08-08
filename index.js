@@ -90,6 +90,14 @@ server.on('client', ({ session }) => {
       console.log(`${sender} asked: ${userText}`);
 
       try {
+        console.log('[TEST] Sending immediate ack before Groq call...');
+        (currentSession || session).sendCommand('say §eTRIGGER RECEIVED - processing your message...');
+        console.log('[TEST] Immediate ack sendCommand completed');
+      } catch (e) {
+        console.log('[TEST] Immediate ack FAILED:', e.message);
+      }
+
+      try {
         const reply = await askGroq(sender, userText);
         // Minecraft chat can't handle newlines well - flatten them
         const safeReply = reply.replace(/\n+/g, ' ').slice(0, 400);
@@ -155,5 +163,5 @@ async function askGroq(sender, userText) {
   const reply = data.choices?.[0]?.message?.content?.trim() || '...';
   memory.addAiMessage(reply);
   return reply;
-          }
-        
+  }
+  
